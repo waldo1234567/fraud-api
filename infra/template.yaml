@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Fraud Detection API
+
+Parameters:
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Existing EC2 key pair name
+  MyIP:
+    Type: String
+    Description: Your IP address in CIDR notation 
+  GitHubRepoURL:
+    Type: String
+    Description: GitHub repository URL for the fraud detection API
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default:  '/aws/service/canonical/ubuntu/server/noble/stable/current/arm64/hvm/ebs-gp3/ami-id'
+
+Resources:
+  FraudAPISecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SSH from my IP only, HTTP from anywhere
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref MyIP
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+  
+  FraudAPIInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t4g.micro
+      ImageId: !Ref LatestAmiId
+      KeyName: !Ref KeyName
+      SecurityGroupIds:
+        - !Ref FraudAPISecurityGroup
+      Tags:
+        - Key: Name
+          Value: fraud-detection-api
+      UserData: 
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e 
+          apt-get update -y
+          apt-get upgrade -y
+          apt-get install -y python3-pip python3-venv git nginx
+
+          sudo -u ubuntu git clone ${GitHubRepoURL} /home/ubuntu/app
+          cd /home/ubuntu/app
+          sudo -u ubuntu python3 -m venv venv
+          sudo -u ubuntu /home/ubuntu/app/venv/bin/pip install -r requirements.txt
+
+          cat > /etc/systemd/system/fraud-api.service << 'EOF'
+          [Unit]
+          Description=Fraud Detection FastAPI service
+          After=network.target
+
+          [Service]
+          User=ubuntu
+          WorkingDirectory=/home/ubuntu/app
+          ExecStart=/home/ubuntu/app/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2
+          Restart=on-failure
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          systemctl daemon-reload
+          systemctl enable --now fraud-api
+
+          rm -f /etc/nginx/sites-enabled/default
+          cat > /etc/nginx/sites-available/fraud-api << 'EOF'
+          server {
+              listen 80;
+              server_name _;
+              location / {
+                  proxy_pass http://127.0.0.1:8000;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+          }
+          EOF
+          ln -sf /etc/nginx/sites-available/fraud-api /etc/nginx/sites-enabled/
+          nginx -t
+          systemctl reload nginx
+
+
+Outputs:
+  PublicIP: 
+    Description: Public IP of the instance
+    Value: !GetAtt FraudAPIInstance.PublicIp
+  SecurityGroupId:
+    Description: Security Group ID
+    Value: !Ref FraudAPISecurityGroup
