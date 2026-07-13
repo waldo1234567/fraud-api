@@ -40,3 +40,5 @@ def predict(transaction: Transaction):
 @app.get("/health")
 def health():
     return {"status": "ok", "model_loaded": model is not None}
+
+#Deployed via CI/CD pipeline
