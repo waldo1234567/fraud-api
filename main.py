@@ -44,3 +44,4 @@ def health():
 #Deployed via CI/CD pipeline
 # CFN two-stack cutover test
 # CFN two-stack cutover, retry with GetAtt fix
+# CFN two-stack cutover, retry with GetAtt fix pt 2
