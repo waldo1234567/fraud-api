@@ -20,6 +20,22 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
+      - name: Get Runner IP
+        id: ip
+        run: echo "ip=$(curl -s https://api.ipify.org)" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-northeast-1
+      
+      - name: open SSH for this run only
+        run : |
+          aws ec2 authorize-security-group-ingress \
+            --group-id ${{ secrets.SECURITY_GROUP_ID }} \
+            --protocol tcp --port 22 --cidr ${{ steps.ip.outputs.ip }}/32
+
       - uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -32,3 +48,10 @@ jobs:
               sudo systemctl restart fraud-api
               sleep 2
               curl -f http://127.0.0.1:8000/health || exit 1
+      
+      - name: Revoke SSH access
+        if: always()
+        run: |
+          aws ec2 revoke-security-group-ingress \
+            --group-id ${{ secrets.SECURITY_GROUP_ID }} \
+            --protocol tcp --port 22 --cidr ${{ steps.ip.outputs.ip }}/32
