@@ -46,8 +46,19 @@ jobs:
               git pull origin main
               ~/app/venv/bin/pip install -r requirements.txt
               sudo systemctl restart fraud-api
-              sleep 2
-              curl -f http://127.0.0.1:8000/health || exit 1
+
+              for i in $(seq 1 10); do
+                if curl -sf http://127.0.0.1:8000/health > /dev/null; then
+                  echo "Service is up after $i seconds"
+                  exit 0
+                fi
+                sleep 1
+              done
+
+              echo "Service failed health check after 10s — dumping diagnostics"
+              sudo systemctl status fraud-api --no-pager
+              sudo journalctl -u fraud-api -n 50 --no-pager
+              exit 1
       
       - name: Revoke SSH access
         if: always()
